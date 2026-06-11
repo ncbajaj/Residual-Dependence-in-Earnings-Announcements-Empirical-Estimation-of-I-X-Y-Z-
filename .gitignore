@@ -1,0 +1,26 @@
+# claude
+.claude/
+
+# paper
+*.pdf
+
+# data caches and generated files
+*.npy
+*.pkl
+*.csv
+*.json
+embeddings_cache/
+raw_filings/
+output/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# system
+.DS_Store
+
+# misc
+hello.py
+*.env
