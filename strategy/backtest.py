@@ -328,9 +328,9 @@ def summarize_backtest(result: BacktestResult) -> str:
         f"  Max drawdown    : {result.max_drawdown * 100:.2f}%",
         f"  Turnover/yr     : {result.turnover_pa:.1f}×",
         f"  Regime events   : {result.n_regime_events}  "
-        f"Sharpe={result.sharpe_regime if result.sharpe_regime is not None else 'n/a':.3g}",
+        f"Sharpe={'n/a' if result.sharpe_regime is None else f'{result.sharpe_regime:.3g}'}",
         f"  Stable events   : {result.n_stable_events}  "
-        f"Sharpe={result.sharpe_stable if result.sharpe_stable is not None else 'n/a':.3g}",
+        f"Sharpe={'n/a' if result.sharpe_stable is None else f'{result.sharpe_stable:.3g}'}",
     ]
     return "\n".join(lines)
 

@@ -159,11 +159,18 @@ def stage_fetch_and_embed(
     Returns a DataFrame with columns: ticker, filing_date, embed_path, text_len.
     Rows with failed fetches or embedding errors are logged and dropped.
     """
-    from data.edgar import save_filings
+    from data.edgar import get_8k_filings, save_filings
     from features.embeddings import embed_transcripts_batch, load_embedding
 
     logger.info("Stage 1: Fetching 8-K filings for %s [%s → %s]", tickers, start, end)
-    save_filings(tickers, start_date=start, end_date=end, out_dir=raw_dir)
+    for i, ticker in enumerate(tickers, 1):
+        try:
+            records = get_8k_filings(ticker, start_date=start, end_date=end)
+            save_filings(records, out_dir=Path(raw_dir))
+            n_202 = sum(1 for r in records if r.item_202_present)
+            logger.info("  [%d/%d] %s: %d 8-Ks, %d with Item 2.02", i, len(tickers), ticker, len(records), n_202)
+        except Exception as exc:
+            logger.error("  [%d/%d] %s: fetch failed: %s", i, len(tickers), ticker, exc)
 
     # Scan raw_dir for fetched filings, collect (ticker, date) pairs
     rows: list[dict] = []
