@@ -29,3 +29,6 @@ __pycache__/
 # misc
 hello.py
 *.env
+
+# ad hoc analysis caches
+earnings_surprise_cache/
