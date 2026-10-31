@@ -115,6 +115,7 @@ def compute_abnormal_return(
             end=dl_end,
             auto_adjust=True,
             progress=False,
+            timeout=15,
             # group_by="ticker" gives a MultiIndex; we handle it below
         )
     except Exception as exc:

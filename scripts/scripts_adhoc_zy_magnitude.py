@@ -9,6 +9,10 @@ Uses the same fixed random subsample (N=400) and permutation-null approach
 as scripts_adhoc_zy_demeaned.py, for speed and comparability.
 """
 import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pandas as pd
 

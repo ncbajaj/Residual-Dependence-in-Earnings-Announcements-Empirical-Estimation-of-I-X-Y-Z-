@@ -15,6 +15,10 @@ load -- the eigendecomposition cost scales as O(N^3), so a subsample of
 400 is ~11x cheaper per permutation than the full N=1407.
 """
 import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pandas as pd
 

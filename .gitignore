@@ -32,3 +32,4 @@ hello.py
 
 # ad hoc analysis caches
 earnings_surprise_cache/
+dataset_cache/

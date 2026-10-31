@@ -16,6 +16,10 @@ the exact same NOCCO estimator already validated in dependence/contingency.py,
 plus a label-permutation null to get a p-value.
 """
 import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

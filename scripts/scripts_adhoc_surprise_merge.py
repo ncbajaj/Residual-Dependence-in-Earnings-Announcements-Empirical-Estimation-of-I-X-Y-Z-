@@ -4,6 +4,10 @@ dataset and check match quality against the existing Z/X/Y events before
 using it as a feature.
 """
 import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pandas as pd
 from pathlib import Path
