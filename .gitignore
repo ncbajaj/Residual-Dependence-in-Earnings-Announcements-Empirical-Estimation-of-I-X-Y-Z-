@@ -10,8 +10,13 @@
 *.csv
 *.json
 embeddings_cache/
+embeddings_cache_fast/
 raw_filings/
+raw_filings_fast/
 output/
+output_full/
+output_fast/
+.runlogs/
 
 # python
 __pycache__/

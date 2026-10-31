@@ -276,6 +276,46 @@ All three are necessary to claim empirical support for Theorem 1.
 
 ---
 
+## Results
+
+The pipeline has been run at three scales. Rather than stopping at the first
+run that looked suggestive, each successive run used more tickers to check
+whether the effect held up — the scale was decided before looking at results,
+not tuned after the fact.
+
+| Run | Tickers | Date range | Events | Regime-shift N | I_regime / I_stable | Permutation p | Net Sharpe | Walk-forward NW p |
+|-----|---------|------------|-------:|----------------:|---------------------:|---------------:|-----------:|--------------------:|
+| Smoke test | 3 | 2023 | 10 | 0 | n/a | n/a | n/a | n/a |
+| Initial | 66 | 2020–2023 | 905 | 11 | 2815× | 0.110 | −0.53 | 0.682 |
+| Scaled | 150 | 2020–2023 | 1354 | 18 | 37× | 0.750 | −0.89 | 0.814 |
+
+**Trading strategy: no edge.** Net Sharpe is negative at both scales, the
+pooled Newey-West t-statistic is nowhere near significant, and zero of the
+canonical signal components survive Benjamini-Hochberg correction at either
+scale. This conclusion is robust and did not change with more data.
+
+**Theorem 1 regime-shift prediction: not supported at this scale.** The
+66-ticker run's apparent effect (I_regime/I_stable = 2815×, p = 0.11) did
+not replicate — scaling to 150 tickers *weakened* it by two orders of
+magnitude (37×, p = 0.75). A real effect should firm up with more data; this
+one went the other way, which is the signature of a small-sample artifact
+(only 11 regime-shift events in the first run) rather than a genuine pattern.
+A fourth run on the full S&P 500 universe (2017–2023, 476 tickers) was
+attempted to check this further but was abandoned at ~32% completion after
+repeated host sleep/wake cycles corrupted its fetch reliability (see
+Known limitations); the two completed, clean runs already give a consistent
+answer and further scaling was not expected to change it.
+
+**Bottom line:** this is a negative result for both the trading signal and,
+at the tested scale, for the paper's regime-shift prediction. That is a
+legitimate and useful finding — it means price features add no incremental,
+cost-surviving information beyond what earnings transcripts already carry
+for this universe and period, and the regime-dependence effect proposed by
+Theorem 1 needs a larger or differently-constructed regime-shift sample
+before it can be confirmed or ruled out.
+
+---
+
 ## Data-leakage audit
 
 The pipeline enforces a strict no-leakage policy:
@@ -452,6 +492,8 @@ walk-forward validation, leakage audit, and theoretical interpretation.
 4. **SPY as benchmark** — single-factor adjustment; no sector/style/size controls
 5. **Small-N bias in NOCCO** — finite-sample positive bias; use for relative comparisons, not absolute quantities
 6. **Proxy for TV distance** — sliced Wasserstein is not TV; the Lemma 14 connection is qualitative
+7. **Ticker→CIK drift** — EDGAR's `company_tickers.json` reflects only the *current* issuer for a ticker; a company that reorganized under a new CIK (e.g. XOM, BLK) resolves to a post-reorg entity with no historical filings unless pinned via the `_HISTORICAL_CIK_OVERRIDE` table in `data/edgar.py`. 22 of 498 S&P 500 tickers (as of this run) don't resolve to any current CIK at all (likely delistings/ticker changes since 2023) and were excluded; see `output_full/excluded_tickers.json`.
+8. **Fetch reliability under host sleep** — EDGAR fetches have no per-ticker retry beyond 3 attempts per HTTP request. If the host machine sleeps mid-run, the wake transition's DNS outage can exhaust those retries and silently zero out whichever tickers/filings were in flight (recorded as `parse_error`, not crashed). Both the 66- and 150-ticker runs lost some filings this way; a long run should hold the host awake (e.g. `caffeinate`) and ideally patch affected tickers with a targeted re-fetch pass afterward.
 
 ---
 

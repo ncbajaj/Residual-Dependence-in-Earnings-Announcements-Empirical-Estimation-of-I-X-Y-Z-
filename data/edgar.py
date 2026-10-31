@@ -91,12 +91,39 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> requests.
 
 _cik_cache: dict[str, str] = {}
 
+# EDGAR's company_tickers.json reflects the CURRENT issuer for a ticker only.
+# When a company reorganizes under a new holding-company CIK (e.g. a merger,
+# a redomiciliation, or an internal restructuring), the ticker now resolves
+# to the new entity's CIK, which has no filing history before the reorg date.
+# For a historical backtest this silently drops the ticker rather than
+# raising, because the lookup and the submissions fetch both succeed — they
+# just succeed against the wrong (newer) CIK with zero overlapping filings.
+#
+# This override pins known affected tickers to the CIK that actually holds
+# their historical 8-K filings. Discovered by cross-checking tickers that
+# returned 0 filings across a multi-year EDGAR range despite being large,
+# actively-reporting issuers (see data/prices.py project notes).
+_HISTORICAL_CIK_OVERRIDE: dict[str, str] = {
+    "XOM": "0000034088",  # Exxon Mobil Corp (current company_tickers.json
+                           # maps XOM to a newer "ExxonMobil Holdings Corp"
+                           # CIK with no pre-reorg filing history)
+    "BLK": "0001364742",  # BlackRock, Inc. (same issue: current mapping
+                           # points at a newer CIK with no history before it)
+}
+
 
 def ticker_to_cik(ticker: str) -> str:
     """
     Return zero-padded 10-digit CIK for a ticker using the EDGAR company tickers
     JSON. Raises ValueError if the ticker is not found.
+
+    Checks _HISTORICAL_CIK_OVERRIDE first: some tickers currently resolve to
+    a post-reorganization CIK with no historical filings, so the override
+    pins them to the CIK that actually has the historical 8-K history.
     """
+    if ticker.upper() in _HISTORICAL_CIK_OVERRIDE:
+        return _HISTORICAL_CIK_OVERRIDE[ticker.upper()]
+
     if ticker in _cik_cache:
         return _cik_cache[ticker]
 
