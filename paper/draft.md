@@ -83,7 +83,7 @@ All kernel bandwidths (median heuristic) and detector thresholds are computed on
 
 ### 4.1 Population-level dependence estimation
 
-We estimate $I(X;Z)$ via a regularized kernel-CCA / NOCCO estimator (Hilbert–Schmidt norm of the normalized cross-covariance operator), cross-checked against the direct sum of squared canonical correlations (relative error $\sim 10^{-9}$ across all runs). We estimate $I(X;Y\mid Z)$ via a leave-one-out kernel-ridge-regression chain [Rifkin & Klautau, 2003]. Both are pre-existing, validated estimators; we use them only in Section 5.1 as a calibration check before moving to the main diagnostic question.
+We estimate $I(X;Z)$ via a regularized kernel-CCA / NOCCO estimator (Hilbert–Schmidt norm of the normalized cross-covariance operator), cross-checked against the direct sum of squared canonical correlations (relative error $\sim 10^{-9}$ across all runs). We estimate $I(X;Y\mid Z)$ via a leave-one-out kernel-ridge-regression chain [Rifkin & Klautau, 2004]. Both are pre-existing, validated estimators; we use them only in Section 5.1 as a calibration check before moving to the main diagnostic question.
 
 ### 4.2 Direct dependence testing with a permutation null
 
@@ -200,7 +200,7 @@ We used earnings-announcement prediction as a case study to test whether covaria
 - Mehta, H. & Harchaoui, Z. *A Generalization Theory for Zero-Shot Prediction.* ICML 2025.
 - Quionero-Candela, J., Sugiyama, M., Schwaighofer, A., & Lawrence, N. D. (eds.) *Dataset Shift in Machine Learning.* MIT Press, 2009.
 - Bernard, V. L. & Thomas, J. K. *Post-Earnings-Announcement Drift: Delayed Price Response or Risk Premium?* Journal of Accounting Research, 1989.
-- Rifkin, R. & Klautau, A. *In Defense of One-Vs-All Classification.* Journal of Machine Learning Research, 2004. (LOO formula reference, per repo convention — verify exact citation before submission.)
+- Rifkin, R. & Klautau, A. *In Defense of One-Vs-All Classification.* Journal of Machine Learning Research, 5:101–141, 2004.
 - Chow, G. C. *Tests of Equality Between Sets of Coefficients in Two Linear Regressions.* Econometrica, 1960.
 
 ## Appendix A: full regularization sweep
