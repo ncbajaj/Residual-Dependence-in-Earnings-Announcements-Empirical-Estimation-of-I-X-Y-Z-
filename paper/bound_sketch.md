@@ -1,8 +1,8 @@
 # A concept-drift term for the zero-shot regime-shift bound: sketch
 
-**Status: working sketch, not a finished theorem.** This lays out a decomposition that is provable now with standard technique, an exact bridging identity connecting it to the CMMD statistic validated empirically (`scripts/step3b_cmmd_permnull.py`), and two explicitly flagged gaps that need the source paper's exact statements in hand before this becomes a real theorem. Honesty about which parts are solid and which aren't is the point of writing this down now rather than later.
+**Status: working sketch, not a finished theorem.** This lays out a decomposition that is provable now with standard technique, an exact bridging identity connecting it to the CMMD statistic validated empirically (`scripts/step3b_cmmd_permnull.py`), a covariate-shift bridge now matched word-for-word against the source paper's Lemma 14, and one remaining open gap (finite-sample confidence bound for the CMMD term, Gap 2) plus one smaller residual item (Gap 1b — verifying an assumption of the now-exact Lemma 14 bridge holds in this case study) before this becomes a real theorem. Honesty about which parts are solid and which aren't is the point of writing this down now rather than later.
 
-**Scope note, important:** Mehta & Harchaoui's Theorem 1 ($\|\eta^\star-\eta_\rho\|^2_{L_2(P_X)} \lesssim I(X;Y\mid Z) + \text{prompt bias}$) is a *single-distribution* statement — no train/deploy shift appears in it at all. The shift-dependent result in this project's framing is their regime-shift corollary (referenced throughout this repo as "Lemma 14," proxied empirically via $\mathrm{TV}(P_X,Q_X)$ in `regime/regime_detection.py`). What follows extends *that* result, not Theorem 1 itself. Before this goes in a real paper, the exact statement of their Lemma 14 needs to be checked against the source and matched precisely — I'm working from this project's own characterization of it, not a verified transcription of the original.
+**Scope note, important:** Mehta & Harchaoui's Theorem 1 ($\|\eta^\star-\eta_\rho\|^2_{L_2(P_X)} \lesssim I(X;Y\mid Z) + \text{prompt bias}$) is a *single-distribution* statement — no train/deploy shift appears in it at all. The shift-dependent machinery this sketch reuses is their Lemma 14 (arXiv:2507.09128v1, Appendix D.3, p.49), which in their paper bridges a *pretraining-vs-evaluation* covariate mismatch, not a temporal one. Section 3 below re-applies their exact inequality to a different pair of distributions (train-time $P$ → deploy-time $Q$) — a legitimate reuse of the same proof technique, but explicitly not the claim they make. The exact statement has now been pulled from the source and checked (previously this was a reconstructed guess; see Section 3 for what the guess got wrong).
 
 ---
 
@@ -22,16 +22,36 @@ $$
 $$
 This is elementary — no assumptions beyond both norms being finite. Call the first term $\mathcal A$ (estimation error, evaluated under the *deployment* covariate measure) and the second $\mathcal B$ (concept drift). The whole point of this sketch is that $\mathcal B = 0$ exactly under pure covariate shift ($P(Y\mid X) = Q(Y\mid X)$ everywhere, by definition), and the existing framework has no term that can become nonzero in that case while $\mathrm{TV}(P_X,Q_X) = 0$ — i.e., the existing bound is structurally silent on exactly the failure mode Section 5.7–5.8 of the draft shows is the operative one in our case study.
 
-## 3. Converting $\mathcal A$ back to the existing machinery (Lemma B — needs the exact source assumption)
+## 3. Converting $\mathcal A$ back to the existing machinery (Lemma B — now checked against the source)
 
-$\mathcal A = \|\eta_\rho-\eta_P\|^2_{L_2(Q_X)}$ is an in-distribution-style estimation error (how far the trained predictor is from the *true training-time* regression function) but weighted by the *deployment* measure $Q_X$ instead of $P_X$. Standard covariate-shift technique bounds this by the $P_X$-weighted version times an inflation factor depending on a boundedness assumption:
+$\mathcal A = \|\eta_\rho-\eta_P\|^2_{L_2(Q_X)}$ is an in-distribution-style estimation error (how far the trained predictor is from the *true training-time* regression function) but weighted by the *deployment* measure $Q_X$ instead of $P_X$.
+
+**Gap 1 — resolved, with a correction.** Mehta & Harchaoui's actual Lemma 14 (arXiv:2507.09128v1, Appendix D.3, p.49) reads: for distributions $P_X,Q_X$ with densities w.r.t. a common dominating measure $\nu_X$, and any $\eta:\mathcal X\to\mathbb R$ with $\eta|_X\in L_2(P_X)\cap L_2(Q_X)$,
+
+- **Additive form**, if $\|\eta\|_\infty<\infty$:
+$$\|\eta\|^2_{L_2(P_X)} \;\le\; \|\eta\|^2_{L_2(Q_X)} + \|\eta\|_\infty^2\,\mathrm{TV}(P_X,Q_X).$$
+- **Multiplicative form**, if $Q_X\ll P_X$ and $\frac{dQ_X}{dP_X}(x)\le B_{P,Q}$ for $P_X$-a.e. $x$:
+$$\|\eta\|^2_{L_2(P_X)} \;\le\; B_{P,Q}\,\|\eta\|^2_{L_2(Q_X)}.$$
+
+In their paper this bridges an estimation-error bound naturally stated under the *pretraining* marginal $Q_X$ (their Theorem 11) back to the *evaluation* marginal $P_X$ that their end-to-end guarantee (their eq. 87) needs — a pretrain/downstream mismatch, not a temporal one. I'm reusing the identical inequality for a different mismatch (train-time $P\to$ deploy-time $Q$ in this sketch's notation), which is a legitimate re-application of the same proof technique (Hölder / change-of-measure) but is **not the same claim they make** — relabeling their target role ($P_X$, the norm being bounded) as my deploy-time $Q$, and their source role ($Q_X$, the norm doing the bounding) as my train-time $P$:
+
 $$
-\|\eta_\rho-\eta_P\|^2_{L_2(Q_X)} \;\le\; \left(1 + c\cdot d(P_X,Q_X)\right)\cdot \|\eta_\rho-\eta_P\|^2_{L_2(P_X)}
+\mathcal A \;=\; \|\eta_\rho-\eta_P\|^2_{L_2(Q_X)} \;\le\; \|\eta_\rho-\eta_P\|^2_{L_2(P_X)} \;+\; \|\eta_\rho-\eta_P\|_\infty^2\,\mathrm{TV}(P_X,Q_X)
 \tag{2}
 $$
-for a divergence $d$ (TV or an $f$-divergence) and a constant $c$ depending on the boundedness of $\eta_\rho-\eta_P$ — this is the *same style* of argument that presumably underlies the project's own Lemma-14 characterization. $\|\eta_\rho-\eta_P\|^2_{L_2(P_X)}$ is then exactly the kind of quantity Theorem 1's machinery already bounds via $I(X;Y\mid Z)$ + prompt bias.
 
-**Gap 1 (open):** the precise form of $d(\cdot,\cdot)$ and $c$, and the boundedness assumption needed to make (2) rigorous, should match whatever Mehta & Harchaoui actually use in their Lemma 14 — I have not re-derived this from their paper directly, only reconstructed the standard shape of such an argument. This needs to be checked against the source before claiming the combined bound in Section 5 below "contains" their result as the $\mathcal B=0$ special case.
+(additive case; requires $\|\eta_\rho-\eta_P\|_\infty<\infty$), or, under a bounded-density-ratio assumption in the other direction ($P_X\ll Q_X$, $\frac{dP_X}{dQ_X}(x)\le B$ for $Q_X$-a.e. $x$),
+
+$$
+\mathcal A \;\le\; B\cdot\|\eta_\rho-\eta_P\|^2_{L_2(P_X)}.
+\tag{2'}
+$$
+
+$\|\eta_\rho-\eta_P\|^2_{L_2(P_X)}$ is then exactly what Theorem 1's machinery bounds via $I(X;Y\mid Z)$ + prompt bias.
+
+**What my original guess got wrong.** The informal $(1+c\cdot d(P_X,Q_X))$ shape I'd written before reading the source was wrong on two counts, not just imprecise: (a) it conflated the additive and multiplicative cases into one multiplicative-looking expression, and (b) the real additive bound (2) scales the TV term by $\|\eta_\rho-\eta_P\|_\infty^2$ — a sup-norm bound on the *predictor-minus-truth gap itself*, not a generic constant times the whole squared norm. That's a materially different, and in our case non-trivial, assumption: KRR predictions aren't bounded a priori without an explicit clipping step or an RKHS-norm argument, so this would need to be checked (or enforced) before being assumed. The multiplicative alternative (2') needs the training covariate distribution $P_X$ absolutely continuous w.r.t. the deployment distribution $Q_X$ with a bounded ratio — i.e. training data can't put mass where deployment covariates essentially never occur — which should be checked empirically (e.g. via the regime detector's embedding space, Section 5.7 of the draft) rather than assumed.
+
+**Residual open item (call it Gap 1b, smaller than the original Gap 1):** verify that $\|\eta_\rho-\eta_P\|_\infty<\infty$ is plausible for the fitted KRR predictor in the case study (or substitute the multiplicative form (2') and check the density-ratio assumption instead) before (4) below is stated as a clean theorem rather than a sketch.
 
 ## 4. The concept-drift term $\mathcal B$, and its exact connection to CMMD (Lemma C — provable now)
 
@@ -59,14 +79,14 @@ $$
 
 The null-case calibration still passes cleanly under the linear kernel. But the 2020→2021 transition, strongly significant under the general (RBF) test, is only marginal under the mean-only (linear, bound-matching) test. Read together with the Chow test's own pattern — the coarse two-period split (2020–21 vs 2022–23) was only marginal at $p=0.067$ while the full four-year split was clearly significant at $p=0.0032$ — three independent signals now agree that the *mean-level* drift $\mathcal B$ specifically concentrates in the 2021→2022 and 2022→2023 transitions (coinciding with the rate-hiking cycle intensifying), while the 2020→2021 change looks more like a shift in the conditional distribution's shape (variance/tails) than in $\eta(x)$ itself. That distinction — not all drift is mean-drift, and the bound's $\mathcal B$ term specifically isolates the part that is — is a genuinely novel empirical point worth keeping in the eventual paper, not just a repeat of the Chow-test finding under a fancier estimator.
 
-## 5. The combined bound (informal statement, pending Gaps 1–2)
+## 5. The combined bound (informal statement, pending Gaps 1b–2)
 
-Putting (1)–(3) together:
+Putting (1), (2), (3) together (additive form of Lemma B; the multiplicative form (2') substitutes cleanly in place of the last two terms of the first bracket if its assumption is preferred):
 $$
-\|\eta_\rho - \eta_Q\|^2_{L_2(Q_X)} \;\lesssim\; \underbrace{\big(1+c\cdot d(P_X,Q_X)\big)\Big(I(X;Y\mid Z) + \text{prompt bias}\Big)}_{\text{covariate-shift-inflated in-distribution error (existing machinery)}} \;+\; \underbrace{\mathbb E_{Q_X}\big[\mathrm{CMMD}_{\text{linear}}(x)^2\big]}_{\text{concept drift (new)}}.
+\|\eta_\rho - \eta_Q\|^2_{L_2(Q_X)} \;\lesssim\; \underbrace{\Big(I(X;Y\mid Z) + \text{prompt bias}\Big) \;+\; \|\eta_\rho-\eta_P\|_\infty^2\,\mathrm{TV}(P_X,Q_X)}_{\text{covariate-shift term (existing machinery + exact Lemma 14 bridge)}} \;+\; \underbrace{\mathbb E_{Q_X}\big[\mathrm{CMMD}_{\text{linear}}(x)^2\big]}_{\text{concept drift (new)}}.
 \tag{4}
 $$
-This is a *combined* bound: it reduces to (a close cousin of) the existing regime-shift result when $\mathcal B=0$, and it remains informative — rather than vacuous — exactly in the regime our case study lives in: $d(P_X,Q_X)\approx 0$ (Section 5.7: neither modality's regime detector flags anything) while $\mathcal B$ is large (Section 5.8: the Chow test and the calibrated CMMD both reject at $p<0.01$).
+This is a *combined* bound: it reduces to (a close cousin of) the existing regime-shift result when $\mathcal B=0$, and it remains informative — rather than vacuous — exactly in the regime our case study lives in: $\mathrm{TV}(P_X,Q_X)\approx 0$ (Section 5.7: neither modality's regime detector flags anything) while $\mathcal B$ is large (Section 5.8: the Chow test and the calibrated CMMD both reject at $p<0.01$). Note this is now the exact structural form of Mehta & Harchaoui's own eq. (87) (Appendix D.3) with the extra $\mathcal B$ term appended — the covariate-shift piece is no longer a reconstructed guess, it's their lemma verbatim, relabeled.
 
 ## 6. Gap 2 (open): turning the point estimate into a confidence bound
 
@@ -77,15 +97,16 @@ Section 5 of this sketch states (4) with the *population* quantity $\mathcal B$.
 | Piece | Status |
 |---|---|
 | Decomposition (1) | Solid — elementary, no assumptions beyond finiteness. |
-| Covariate-shift inflation (2) | Standard proof technique, but the exact constants/assumption need to match the source paper's Lemma 14 (Gap 1). |
+| Covariate-shift bridge (2)/(2') | **Resolved.** Exact statement of Mehta & Harchaoui's Lemma 14 (arXiv:2507.09128v1, Appx. D.3, p.49), re-applied to train→deploy shift instead of their pretrain→eval shift. Original guessed form was wrong in structure, not just constants (see Section 3). Residual item: verify $\|\eta_\rho-\eta_P\|_\infty<\infty$ or the multiplicative form's density-ratio bound holds for the case study (Gap 1b, smaller than original Gap 1). |
 | CMMD-as-exact-identity for $\mathcal B$ under a linear output kernel (3) | Solid, essentially definitional. |
 | Empirical validation that the underlying drift is real and detectable | Done, both with the general (RBF) and the bound-matching (linear) output kernel (`step2g_chow_test.py`, `step3b_cmmd_permnull.py`, `step3c_cmmd_linear.py`). The two kernels disagree on the 2020→2021 transition specifically, which is itself informative (mean-drift vs shape-drift, see Section 4). |
 | Finite-sample confidence bound on $\mathcal B$, not just a p-value (Gap 2) | Open — needs the source CMMD paper's Theorem 4.4 read in full and checked for transfer. |
-| Combined bound (4) as a fully rigorous theorem | Not yet — contingent on closing Gaps 1 and 2. |
+| Combined bound (4) as a fully rigorous theorem | Not yet — contingent on closing Gap 1b and Gap 2. |
 
 ## 8. Concrete next steps, in order
 
 1. ~~Rerun with a linear output kernel to get the bound-matching point estimate of $\mathcal B$.~~ **Done** — see Section 4; result is more textured than expected (mean-drift concentrates in 2 of 3 year-pairs, not all 3).
-2. Pull the exact statement of Mehta & Harchaoui's Lemma 14 and check it against the reconstructed form in (2) — resolves Gap 1.
+2. ~~Pull the exact statement of Mehta & Harchaoui's Lemma 14 and check it against the reconstructed form in (2).~~ **Done** — see Section 3; the guessed form was structurally wrong (conflated additive/multiplicative cases), now replaced with the exact source statement. Resolves Gap 1, leaves a smaller residual item (Gap 1b): check the sup-norm or density-ratio assumption actually holds for the KRR fit used in the case study.
 3. Pull the exact statement of the kernel conditional two-sample test paper's Theorem 4.4 and check whether it transfers to a high-probability bound on the *aggregated* quantity $\mathcal B = \mathbb E_{Q_X}[\mathrm{CMMD}^2]$, as opposed to a pointwise test at a single $x$ — resolves Gap 2.
-4. Only after 2–3: write the combined bound as a real, numbered theorem with a complete proof, and re-verify the empirical numbers in the draft against the linear-kernel estimator from step 1.
+4. Check Gap 1b empirically: either bound $\|\eta_\rho-\eta_P\|_\infty$ for the fitted KRR predictor (e.g. via clipping or an RKHS-norm argument) or verify the bounded-density-ratio assumption for (2') using the regime detector's embedding space.
+5. Only after 3–4: write the combined bound as a real, numbered theorem with a complete proof, and re-verify the empirical numbers in the draft against the linear-kernel estimator from step 1.
