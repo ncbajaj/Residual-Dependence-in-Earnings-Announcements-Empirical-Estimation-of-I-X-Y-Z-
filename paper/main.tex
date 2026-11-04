@@ -1,0 +1,382 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{natbib}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\newcommand{\TV}{\mathrm{TV}}
+
+\title{Diagnosing Generalization Failure Beyond Covariate Shift:\\
+A Concept-Drift Case Study in Zero-Shot Financial Prediction}
+\author{Neil Bajaj\\ \texttt{neil.chopra.bajaj@gmail.com}}
+\date{Draft v0.1 --- arXiv-bound. Not yet peer reviewed.}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Generalization bounds for zero-shot prediction typically decompose the error of a predictor trained on one distribution and deployed on another into an in-distribution term plus a \emph{covariate-shift} penalty --- a divergence between the training and deployment input distributions, usually total variation (TV) or a related integral probability metric. This framing implicitly assumes that when such a predictor fails to generalize, a detectable shift in the input distribution is the mechanism responsible, or at least a necessary accompanying symptom. We test this assumption empirically using earnings-call transcripts, pre-announcement price features, and analyst earnings-surprise data as a richly instrumented case study, chosen because it admits exactly the kind of controlled, multi-angle diagnosis the question requires: a real, independently-verifiable population-level dependence signal; a natural walk-forward temporal validation structure; and cheap, principled ablations on model capacity, regularization, and distributional shift. We find a statistically robust population-level dependence between transcript content and forward returns (permutation $z\approx4.6$--$7.7$, surviving a company-fixed-effects control), but a model trained to exploit it fails walk-forward out-of-sample validation (net Sharpe $-0.89$, Newey--West $p=0.08$, reversing the apparently profitable sign of a naive single-split evaluation). We then run a five-step elimination protocol --- capacity ablation, a six-order-of-magnitude regularization sweep, and covariate-shift detection on both input modalities via a rolling distributional-distance detector --- and find that none of them explain the failure: a 4-dimensional model fails identically to a 388-dimensional one, no regularization setting recovers out-of-sample correlation, and neither the transcript-embedding nor the price-feature marginal distribution shows a detectable shift during the failure windows. A direct structural-break (Chow) test on a reduced linear model confirms the remaining candidate explanation directly rather than by elimination: the conditional relationship between features and outcomes changes significantly across the training/deployment boundary ($F(15,1276)=2.30$, $p=0.003$), with the instability concentrated in specific feature coordinates. A nonparametric, permutation-calibrated conditional two-sample test (CMMD) agrees independently, and further distinguishes \emph{mean}-level drift from a shift in the conditional distribution's shape --- the two agree on 2 of 3 year-over-year transitions and disagree, informatively, on the third. This is \emph{concept drift} --- a change in $P(Y\mid X)$, not $P(X)$ --- which a covariate-shift bound is structurally unable to detect or budget for. We argue this gap is not specific to our case study: any zero-shot bound stated purely in terms of input-distribution divergence will silently mis-attribute, or fail to flag, generalization failures whose actual source is concept drift, and we propose the five-step protocol used here as a general, reusable diagnostic for telling the two failure modes apart.
+\end{abstract}
+
+\section{Introduction}
+
+A standard move in the zero-shot and transfer-learning generalization literature is to bound the deployment-time error of a predictor trained on a source distribution by its source error plus a term measuring how far the deployment (target) input distribution has moved from the source input distribution --- typically total variation, Wasserstein distance, or another integral probability metric between $P_X$ and $Q_X$. This is a \emph{covariate-shift} bound: it attributes generalization failure to a detectable change in the marginal distribution of the inputs, and, conversely, it implies that in the absence of such a detectable shift, the predictor's in-distribution performance should approximately carry over.
+
+This is a clean and useful theoretical framing, and it is correct as a bound --- a bound is always correct, in the sense that it holds; the open empirical question is whether the covariate-shift term is the one doing the explanatory work when a \emph{real} predictor fails to generalize, or whether it is frequently vacuous or irrelevant while the actual failure comes from a different source entirely: \emph{concept drift}, a change in the conditional distribution $P(Y\mid X)$ itself, which no bound stated purely in terms of $P_X$ versus $Q_X$ can see.
+
+Distinguishing these two failure modes matters practically. If a practitioner observes a generalization gap and checks only for covariate shift --- the natural first instinct, and the one a covariate-shift bound invites --- a null result (``the input distribution looks the same'') will be read as reassurance that the model should still be trusted, or as a puzzle with no available explanation. If the true cause is concept drift, that reassurance is false, and no amount of input-distribution monitoring will ever catch it.
+
+We investigate this question using a case study chosen specifically because it lets us check every link in the causal chain independently, rather than relying on a single global generalization-gap number: earnings-call-transcript-based prediction of short-horizon stock returns. This domain has three properties that make it an unusually well-instrumented testbed for the covariate-shift-versus-concept-drift question, independent of any interest in trading:
+
+\begin{enumerate}
+  \item \textbf{A verifiable population-level signal exists}, so a null walk-forward result cannot be dismissed as ``there was never anything to generalize in the first place'' --- we can show the signal is real, directly, before asking whether a trained model recovers it out-of-sample.
+  \item \textbf{A natural, non-adversarial temporal train/test structure} (announcements occur continuously over calendar time) gives walk-forward validation real content, rather than an arbitrary train/test split.
+  \item \textbf{Multiple independent input modalities} (transcript text, pre-announcement price behavior, analyst earnings surprise) let us run the covariate-shift check on more than one representation of $X$, which matters: a shift undetectable in one modality's marginal distribution could in principle be visible in another's, and finding neither raises our confidence that the absence of detectable covariate shift is not simply an artifact of which representation we happened to inspect.
+\end{enumerate}
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item We give a concrete empirical case in which a real, statistically verified population-level dependence between inputs and a target fails to survive a trained, walk-forward-validated predictor, and show the apparent single-split ``success'' of a naive strategy \emph{reverses sign} under honest out-of-sample validation --- a cautionary result about the trap of evaluating zero-shot or transfer claims on a single split.
+  \item We give a five-step elimination protocol --- capacity ablation, regularization sweep, covariate-shift detection on each input modality, a structural-break test, and an independent nonparametric confirmation --- that rules out the most common ``fixable'' explanations for a generalization gap (overfitting, under-regularization, detectable input-distribution shift) before concluding concept drift, and confirms the conclusion directly rather than resting on elimination alone.
+  \item We argue, and give a worked example of, the general point: covariate-shift bounds are silent on concept drift by construction, and a predictor can fail to generalize with \emph{no detectable change in $P_X$ at all} --- which means empirical covariate-shift monitoring is not a sufficient diagnostic for trusting a zero-shot predictor's deployment-time behavior, however reassuring a null covariate-shift test looks.
+\end{itemize}
+
+\section{Background}
+
+\subsection{Zero-shot generalization bounds and the covariate-shift framing}
+
+\citet{mehta2025generalization} bound the $L_2(P_X)$ error of a zero-shot predictor $\eta_\rho$ relative to the Bayes-optimal in-distribution predictor $\eta^\star$:
+\[
+\|\eta^\star - \eta_\rho\|^2_{L_2(P_X)} \;\lesssim\; I(X; Y \mid Z) \;+\; \text{prompt bias},
+\]
+where $Z$ is an auxiliary (zero-shot) representation and $I(X;Y\mid Z)$ is the residual conditional dependence between the \emph{direct} input $X$ and the target $Y$ left unexplained by $Z$. Within their framework, a companion result (their Lemma 14, in the paper's numbering) further relates generalization degradation under \emph{distribution shift} to the total-variation distance $\TV(P_X, Q_X)$ between the training and deployment input distributions --- a covariate-shift bound in the classical sense of \citet{quinonerocandela2009dataset}.
+
+This is the theoretical object we set out to stress-test empirically: does a detectable TV-style shift in the relevant input distribution actually accompany observed generalization failures, or can a zero-shot-style predictor fail to generalize with the input distribution looking entirely ordinary?
+
+\subsection{Covariate shift versus concept drift}
+
+The distinction we lean on throughout is standard in the dataset-shift literature \citep{quinonerocandela2009dataset}: \textbf{covariate shift} is a change in $P(X)$ (or $P(Z)$) between training and deployment with $P(Y\mid X)$ held fixed; \textbf{concept drift} is a change in $P(Y\mid X)$ itself, which can occur with $P(X)$ completely unchanged. A bound stated as a function of $\TV(P_X, Q_X)$, or any other divergence between the two \emph{marginal} input distributions, is by construction a covariate-shift bound: it is mathematically blind to concept drift, because concept drift can occur at TV distance zero.
+
+\subsection{Post-earnings-announcement drift, briefly}
+
+Our case-study domain has one well-established empirical regularity worth noting up front, because it gives us an internal check on whether our pipeline is finding something real: analyst earnings surprises predict same-direction subsequent returns, a finding with a decades-long replication record beginning with \citet{bernard1989postearnings}. We use this as a sanity check in Section~\ref{sec:structural-break}: if our structural-break analysis recovers the surprise-return relationship as the \emph{most} stable coefficient across years, relative to price-based features with no comparable theoretical grounding, that is independent corroboration that our pipeline is measuring something real rather than an artifact of our own construction.
+
+\section{Case study: data and construction}
+
+\subsection{Sources and universe}
+
+We construct a dataset from three sources: SEC EDGAR 8-K Item 2.02 filings (earnings-call transcripts), yfinance adjusted daily OHLCV (price data), and yfinance's analyst earnings-date history (estimated vs.\ reported EPS, i.e.\ the earnings surprise). The universe is 150 large- and mid-cap US equities, systematically sampled from the 2024 S\&P 500 constituent list (every $n$-th ticker by alphabetical order, for even coverage across the list rather than a contiguous block), over January 2020--December 2023. An earlier, smaller run (66 tickers, same period) is reported alongside the 150-ticker results in Section~\ref{sec:small-n} specifically because comparing the two is itself informative about estimator reliability at small $N$.
+
+\subsection{Variables}
+
+\begin{itemize}
+  \item $X$: 3-dimensional pre-announcement price features computed over the $[t-22, t-2]$ trading-day window relative to the announcement date $t$.
+  \item $Z$: a 384-dimensional sentence embedding (all-MiniLM-L6-v2) of the transcript text.
+  \item $Y$: the forward 5-trading-day abnormal return, $(P_{t+5}^{\text{close}} / P_{t+1}^{\text{open}} - 1) - $ the identical-window SPY return, computed with no overlap with the $[t-22,t-2]$ window used to build $X$.
+  \item $S$: the earnings surprise (analyst EPS estimate vs.\ reported EPS, percent), matched to each transcript event within a 3-day tolerance.
+\end{itemize}
+
+$S$ and $Z$ are revealed at the same moment --- the earnings release --- so using $S$ to predict the forward return window is not lookahead, for the same reason using $Z$ is not.
+
+\subsection{Two data-quality findings worth flagging independently}
+
+Two issues surfaced during construction that are not specific to our analysis and are likely to recur in any EDGAR-based earnings-event pipeline:
+
+\textbf{Ticker-to-CIK drift.} EDGAR's \texttt{company\_tickers.json} maps a ticker to its \emph{current} filer only. Two tickers in our universe (XOM, BLK) currently resolve to a post-reorganization CIK with no pre-reorganization filing history, silently zeroing the ticker out of any backtest spanning the reorganization date unless corrected with a historical-CIK override.
+
+\textbf{Non-earnings Item 2.02 filings.} A subset of filings flagged ``Item 2.02 present'' are not the quarterly earnings release at all. One airline in our universe files a mid-quarter investor-guidance update under the same item code, consistently 9 days before the real earnings date; another company files a second, unrelated Item 2.02 filing roughly a month after every real earnings release. Both are detectable and excludable by requiring a successful match to an independently-sourced earnings-surprise record (Section~3.2), which we do throughout.
+
+\subsection{Leakage controls}
+
+All kernel bandwidths (median heuristic) and detector thresholds are computed on training data only and frozen for evaluation on held-out data. All conditional-mean predictions reported as ``in-sample'' in Section~\ref{sec:results} are still ridge-regularized fits, not raw interpolation; ``out-of-sample'' predictions always use a cross-kernel against training data only, with the training kernel's own bandwidth. Train/test splits are strictly chronological (walk-forward, Section~\ref{sec:methods}). See Appendix~\ref{app:leakage} for the full audit.
+
+\section{Methods}
+\label{sec:methods}
+
+\subsection{Population-level dependence estimation}
+
+We estimate $I(X;Z)$ via a regularized kernel-CCA / NOCCO estimator (Hilbert--Schmidt norm of the normalized cross-covariance operator), cross-checked against the direct sum of squared canonical correlations (relative error $\sim 10^{-9}$ across all runs). We estimate $I(X;Y\mid Z)$ via a leave-one-out kernel-ridge-regression chain \citep{rifkin2004defense}. Both are pre-existing, validated estimators; we use them only in Section~\ref{sec:small-n} as a calibration check before moving to the main diagnostic question.
+
+\subsection{Direct dependence testing with a permutation null}
+
+$I(X;Y\mid Z)\approx 0$ is consistent with two different stories --- $Z$ fully mediates whatever $X$ would tell us about $Y$, or neither $X$ nor $Z$ tells us anything about $Y$ to begin with --- so we additionally test $I(Z;Y)$ directly, using the same kernel dependence statistic with a label-permutation null (200 permutations unless noted), both on the full sample and after removing each ticker's own mean return (to rule out a company-identity confound: $Z$ could encode ``which company is this'' via a stylistic fingerprint, which would be spuriously informative about $Y$ if different companies simply have different average returns over the sample period).
+
+\subsection{Predictive model and walk-forward validation}
+
+We fit kernel ridge regression (KRR) on a combined kernel $K = \tfrac{1}{3}(K_Z + K_X + K_S)$ (equal-weighted sum of per-modality RBF kernels, bandwidths by median heuristic on training data) to predict $|Y|$ (a magnitude model) and $Y$ directly (a direction model). A magnitude-filtered strategy trades only the top 40\% of test events by predicted $|Y|$, using the sign of the direction model's prediction, at 5bps one-way transaction cost. We validate with a single chronological train/test split and, separately, with walk-forward folds (2-year train / 1-year test / 6-month step) using Newey--West standard errors (5 lags, matching the holding period) for significance.
+
+\subsection{Elimination protocol}
+\label{sec:elimination}
+
+When the walk-forward result fails, we run five diagnostic checks, in order, each designed to rule out one specific candidate explanation before concluding the next:
+
+\begin{enumerate}
+  \item \textbf{Capacity ablation.} Compare the full model ($Z+X+S$, 388 dimensions) against a low-capacity model ($X+S$ only, 4 dimensions, no transcript) on in-sample vs.\ out-of-sample correlation, per fold. If the low-capacity model fails identically, the failure is not explained by having ``too many'' embedding dimensions to fit noise with.
+  \item \textbf{Regularization sweep.} Sweep the KRR ridge parameter $\lambda$ across six orders of magnitude on the low-capacity model. If some $\lambda$ recovers positive, stable out-of-sample correlation while in-sample correlation falls (the textbook bias-variance curve), the failure was fixable under-regularization. If out-of-sample correlation never leaves the noise band around zero at any $\lambda$, it was not.
+  \item \textbf{Covariate-shift detection.} Using the same rolling sliced-Wasserstein regime detector the covariate-shift bound in Section~2.1 motivates (90-day windows, threshold = train-window mean + 1.5 train-window std), flag test events as regime-shift or stable, separately using $Z$'s and $X$'s own distributions. Split the out-of-sample correlation by this flag. If the failure concentrates in flagged-shift events, covariate shift is implicated; if it is uniform across stable and shift events --- or if no shift events are flagged at all during a demonstrably-failing test window --- covariate shift (at least of the kind this detector is built to catch) is ruled out.
+  \item \textbf{Structural-break test.} Fit a simple linear model $Y = b_0 + b_1 X_1 + b_2 X_2 + b_3 X_3 + b_4 S + \varepsilon$ separately in each of several non-overlapping calendar periods and run a Chow test \citep{chow1960tests} comparing the pooled-fit residual sum of squares against the sum of per-period residual sums of squares. A significant Chow statistic is direct evidence that the conditional relationship $P(Y\mid X,S)$ itself differs across periods --- concept drift, confirmed rather than inferred by the elimination in steps 1--3.
+  \item \textbf{Independent confirmation via conditional two-sample testing.} The Chow test in step 4 commits to a specific linear functional form. As a nonparametric cross-check, we additionally test for a difference in the conditional distribution $P(Y\mid X,S)$ across consecutive calendar years directly, using a permutation-calibrated conditional maximum mean discrepancy (CMMD) statistic \citep{massiani2025kernel} built from kernel-ridge-regression witness functions, with both a general-shape (RBF) and a mean-only (linear) output kernel on $Y$. This makes no linearity assumption and, with the linear output kernel specifically, targets the same population quantity --- the squared conditional-mean gap $\mathbb{E}_{Q_X}[(\eta_P(x)-\eta_Q(x))^2]$ --- that a concept-drift extension of the zero-shot bound would need to control (see Section~\ref{sec:discussion}).
+\end{enumerate}
+
+\section{Results}
+\label{sec:results}
+
+\subsection{Population-level dependence is real, and finite-sample estimates at small $N$ should not be over-trusted}
+\label{sec:small-n}
+
+At 66 tickers (905 events, 11 detected regime-shift events), the ratio $\hat{I}(X;Y\mid Z)_{\text{regime}} / \hat{I}(X;Y\mid Z)_{\text{stable}} = 2815$, with permutation $p=0.110$. At 150 tickers (1354 events, 18 detected regime-shift events), the same ratio is $37$, with $p=0.750$. The effect \emph{weakens by two orders of magnitude} as the sample grows --- the signature of a small-$N$ estimator artifact rather than a strengthening real effect, and a direct illustration of why a single small-sample NOCCO-style estimate should not be reported as a discovered effect without a replication check at a second scale. We flag this explicitly because it is exactly the kind of result that looks publishable at $N=11$ regime events and is not.
+
+\subsection{Direct test: $I(Z;Y)$ is real and survives a company-identity confound}
+
+On the 150-ticker sample ($N=1405$), $\hat{I}(Z;Y)=7.576$ against a permutation null of $6.385\pm0.154$ ($z\approx7.7$, $p<0.005$ at this permutation count). After removing each ticker's own mean return ($N=1407$, 84 tickers, between-ticker variance $\approx 8\%$ of total), $\hat{I}(Z;Y_{\text{demeaned}})=7.650$, essentially unchanged --- ruling out the company-identity confound directly rather than assuming it away.
+
+\subsection{The dependence is mostly about magnitude, with a much weaker direction component}
+
+Decomposing $Y_{\text{demeaned}}$ into $|Y|$ and $\mathrm{sign}(Y)$ on a fixed $N=400$ subsample (for permutation-test tractability): $\hat{I}(Z;|Y|)=12.19$ against null $10.98\pm0.26$ ($z=4.61$); $\hat{I}(Z;\mathrm{sign}(Y))=1.16$ against null $0.97\pm0.12$ ($z=1.53$). Both exceed every one of 100 permutation draws ($p<0.01$ at this resolution), but the two effect sizes differ by roughly a factor of three. This matters for Section~\ref{sec:naive-strategy}: a magnitude-dominated signal and a direction-dominated signal have very different implications for a directional trading strategy, independent of any generalization question.
+
+\subsection{A naive strategy ``succeeds'' on a single split and fails walk-forward, with the sign reversed}
+\label{sec:naive-strategy}
+
+On a single chronological split (train through 2022, test 2023), the magnitude-filtered subset shows net Sharpe $+0.08$ (mean P\&L $+3.15$bps/event, hit rate 51.9\%) against a baseline (trade every test event) net Sharpe of $-0.19$ ($-8.33$bps/event, hit rate 51.5\%) --- the magnitude filter appears to turn a losing strategy into a marginally profitable one, by concentrating a fixed transaction cost against larger expected moves rather than by improving the directional hit rate at all.
+
+Under proper walk-forward validation (3 folds, 2yr/1yr/6mo), this reverses: pooled baseline net Sharpe $-0.05$ (NW $t=-0.18$, $p=0.86$); pooled magnitude-filtered net Sharpe $-0.89$ (NW $t=-1.75$, $p=0.08$), the wrong sign from the single-split result, and consistent across all three folds individually (fold P\&Ls: baseline $+18.65/-17.10/-10.10$bps vs.\ filtered $+6.76/-57.71/-71.03$bps). A single train/test split is not a safe way to validate a zero-shot or out-of-sample claim; this is a concrete illustration of exactly how it can mislead, in both direction and magnitude.
+
+\subsection{Elimination step 1: capacity is not the explanation}
+
+Comparing the full model (388-dim) to the low-capacity model (4-dim, no transcript) across the 3 walk-forward folds (Table~\ref{tab:capacity}):
+
+\begin{table}[H]
+\centering
+\caption{In-sample / out-of-sample direction correlation, full vs.\ low-capacity model.}
+\label{tab:capacity}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Fold & Full: in-sample / out-of-sample & Low-capacity: in-sample / out-of-sample \\
+\midrule
+0 & 0.584 / 0.023  & 0.475 / 0.012 \\
+1 & 0.586 / 0.006  & 0.490 / $-$0.030 \\
+2 & 0.575 / $-$0.047 & 0.480 / $-$0.036 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The 4-dimensional model fails identically to the 388-dimensional one in every fold. If ``too many embedding dimensions'' were the explanation, the low-capacity model should have generalized; it did not.
+
+\subsection{Elimination step 2: no regularization setting recovers out-of-sample correlation}
+
+Sweeping $\lambda\in\{10^{-3},\dots,10^{3}\}$ on the low-capacity direction model, per fold (full table in Appendix~\ref{app:regsweep}; summary below is the range across the sweep, Table~\ref{tab:regsweep-summary}):
+
+\begin{table}[H]
+\centering
+\caption{Regularization sweep summary: range of in-sample and out-of-sample correlation across $\lambda\in\{10^{-3},\dots,10^{3}\}$.}
+\label{tab:regsweep-summary}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Fold & In-sample corr range & Out-of-sample corr range \\
+\midrule
+0 & $0.669 \to 0.308$ & $+0.056 \to -0.032$ \\
+1 & $0.684 \to 0.357$ & $-0.030 \to -0.044$ \\
+2 & $0.683 \to 0.267$ & $+0.005 \to -0.040$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In-sample correlation falls smoothly and monotonically with $\lambda$, exactly as the standard bias-variance tradeoff predicts. Out-of-sample correlation never leaves a band of roughly $[-0.05, +0.06]$ at \emph{any} setting, in \emph{any} fold --- there is no intermediate $\lambda$ at which an under-regularization story would predict a peak, and none is observed.
+
+\subsection{Elimination step 3: no detectable covariate shift, in either modality}
+
+Using the $Z$-embedding-based regime detector (same criterion as the covariate-shift bound motivating this entire check): fold 0 flags 19 of 350 test events as regime-shift; folds 1 and 2 --- the two \emph{worst}-performing folds in Section~\ref{sec:naive-strategy} --- flag \textbf{zero}. Pooled out-of-sample correlation on stable-flagged events is $-0.038$ ($N=979$); on the (small, fold-0-only) shift-flagged subset it is $+0.109$ ($N=19$), the opposite of what a covariate-shift story predicts, on too few points to trust.
+
+Repeating with a regime detector built on $X$ (price features) instead of $Z$: \textbf{zero} shift events are flagged in \emph{all three} folds. Neither modality's marginal distribution shows anything a sliced-Wasserstein distributional-distance detector --- the same family of statistic the covariate-shift bound is built around --- would flag as unusual, during windows where the model demonstrably fails.
+
+\subsection{Elimination step 4 $\to$ confirmation: a direct structural-break test finds concept drift}
+\label{sec:structural-break}
+
+A Chow test on $Y \sim 1 + X_1 + X_2 + X_3 + S$, split into two non-overlapping halves (2020--2021 vs.\ 2022--2023): $F(5,1286)=2.07$, $p=0.067$ --- suggestive but not significant at this coarse a split. Splitting into four non-overlapping calendar years: $F(15,1276)=2.30$, $p=0.0032$ --- significant. The coefficients make the mechanism visible directly, not just statistically (Table~\ref{tab:chow-coefs}):
+
+\begin{table}[H]
+\centering
+\caption{Per-year coefficients, $Y \sim 1 + X_1 + X_2 + X_3 + S$.}
+\label{tab:chow-coefs}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+Feature & 2020 & 2021 & 2022 & 2023 \\
+\midrule
+$X_1$ & $+0.0034$ & $-0.0080$ & $+0.0042$ & $-0.0039$ \\
+$X_2$ & $-0.0028$ & $-0.0013$ & $-0.0012$ & $-0.0041$ \\
+$X_3$ & $-0.0002$ & $-0.0031$ & $-0.0044$ & $-0.0013$ \\
+$S$ (surprise) & $+0.0014$ & $+0.0003$ & $+0.0018$ & $+0.0003$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$X_1$'s coefficient changes sign in every single year. $S$'s coefficient is the only one that keeps the same sign across all four years --- consistent, independently, with the established post-earnings-announcement-drift literature (Section~2.3), and a useful internal check that this is a real property of the data rather than an artifact of how we built the pipeline: the one feature with a theoretical reason to be stable is the one that is stable, and the features without such grounding (simple pre-announcement price statistics) are the ones that drift.
+
+This is concept drift, confirmed directly by a test of $P(Y\mid X,S)$ itself, not inferred from the absence of other explanations. It is also, by construction (Section~2.2), invisible to a covariate-shift bound: $X$ and $Z$'s marginal distributions passed every check in the previous section precisely while the conditional relationship was moving underneath them.
+
+\subsection{A second, nonparametric confirmation --- and a distinction the Chow test can't see}
+\label{sec:cmmd}
+
+The Chow test commits to a linear functional form; the permutation-calibrated CMMD test (Section~\ref{sec:elimination}, step 5) makes no such assumption and agrees with it independently. With a general-shape (RBF) output kernel, all three consecutive year-pairs show a significant conditional-distribution difference against a same-year random-split null that is correctly non-significant throughout (Table~\ref{tab:cmmd}):
+
+\begin{table}[H]
+\centering
+\caption{CMMD permutation test results, RBF vs.\ linear output kernel.}
+\label{tab:cmmd}
+\begin{tabular}{@{}p{3.1cm}p{4.6cm}p{4.9cm}@{}}
+\toprule
+Comparison & RBF CMMD ($z$, $p$) & Linear CMMD ($z$, $p$) \\
+\midrule
+2020 vs.\ 2021 & $z=5.23$, $p<0.001$ & $z=1.29$, $p=0.083$ (not significant) \\
+2021 vs.\ 2022 & $z=7.86$, $p<0.001$ & $z=3.78$, $p<0.001$ \\
+2022 vs.\ 2023 & $z=7.77$, $p<0.001$ & $z=3.49$, $p<0.001$ \\
+same-year nulls (all 4 years) & correctly non-significant ($-1.54\le z\le1.04$) & correctly non-significant ($-0.88\le z\le0.35$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The two output kernels disagree in exactly one place, and the disagreement is informative rather than noise. A \textbf{linear} output kernel collapses the CMMD statistic to a direct comparison of conditional means, $|\hat\eta_{y_1}(x)-\hat\eta_{y_2}(x)|$ --- the same population quantity ($\mathbb{E}_{Q_X}[(\eta_P(x)-\eta_Q(x))^2]$) that a concept-drift extension of the zero-shot bound would need to control. Under that kernel, 2021$\to$2022 and 2022$\to$2023 remain clearly significant, but 2020$\to$2021 drops to only marginal ($p=0.083$), while the general-shape (RBF) test found all three transitions significant. Read together with the Chow test's own pattern from Section~\ref{sec:structural-break} --- the coarse two-period split (2020--21 vs.\ 2022--23) was only marginal ($p=0.067$) while the full four-year split was clearly significant ($p=0.0032$) --- three independent signals agree that \textbf{mean-level drift specifically concentrates in the 2021$\to$2022 and 2022$\to$2023 transitions} (coinciding with the rate-hiking cycle intensifying), while the 2020$\to$2021 change looks more like a shift in the conditional distribution's shape (variance or tails) than in its mean. Not all concept drift is mean drift, and a bound (or an estimator) built only to detect the former would have under-stated the 2020$\to$2021 transition specifically while correctly catching the later two.
+
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{What this says about covariate-shift bounds}
+
+The zero-shot bound in Section~2.1 is correct as a bound --- nothing here contradicts it. What this case study shows is that the \emph{covariate-shift term specifically} can be empirically uninformative about why a real generalization gap exists, even when that gap is large and the underlying population-level dependence motivating the predictor in the first place is genuinely real and independently verified (Sections~5.2--5.3). A practitioner who checked only for covariate shift here --- which is the natural, and in our case the theoretically-motivated, first check --- would have found nothing, and would have had no remaining tool, within that framework, to explain the failure. The Chow test in Section~\ref{sec:structural-break} is not part of the zero-shot generalization framework at all; it is imported from classical econometrics specifically because the covariate-shift framework has no mechanism for detecting the failure mode that turned out to be the actual one.
+
+We think this generalizes beyond our case study: any bound stated purely as a function of $\TV(P_X,Q_X)$ or a similar input-distribution divergence is, by construction, silent on concept drift, and concept drift is not a rare or exotic failure mode --- it is the default way a \emph{relationship}, as opposed to a \emph{distribution}, changes over time. A complete empirical diagnostic for ``will my zero-shot predictor still work'' should include a concept-drift check as a first-class step, not an afterthought reached only after a covariate-shift check comes back negative and the practitioner is left without an explanation.
+
+The linear-output-kernel CMMD statistic used for confirmation in Section~\ref{sec:cmmd} is not just a diagnostic convenience: under that kernel it is an exact plug-in estimator for $\mathbb{E}_{Q_X}[(\eta_P(x)-\eta_Q(x))^2]$, the natural concept-drift term that a decomposition of the deployment-time error would add alongside the existing covariate-shift term. Formalizing that decomposition into a single bound --- and checking whether the finite-sample confidence bounds available for this statistic \citep{massiani2025kernel} transfer to give a usable high-probability guarantee on the term itself, rather than only a permutation-test rejection --- is ongoing work and outside the scope of this paper's empirical claims.
+
+\subsection{The five-step protocol as a reusable tool}
+
+We present the elimination protocol in Section~\ref{sec:elimination} as a general-purpose diagnostic, not specific to finance or to transcripts. Any setting with (a) a trained model that fails to generalize out-of-sample and (b) the ability to construct a lower-capacity ablation, sweep regularization, and fit a regime detector on each input modality, can run the same steps. The value of running them \emph{in this specific order} is that each step closes off one alternative explanation cheaply before a more expensive or more specific test (the structural-break test, which requires committing to a reduced functional form, and the nonparametric conditional two-sample test that confirms it without that commitment) is needed to confirm the remaining one.
+
+\subsection{Limitations}
+
+Our universe (150 of $\sim$500 S\&P constituents, systematically but not randomly sampled, 2020--2023, US equities only) is modest by empirical-asset-pricing standards; we make no claim that these specific numerical results (Sharpe ratios, Chow $F$-statistics) generalize beyond this sample, only that the \emph{pattern} --- real dependence, walk-forward failure, elimination of capacity/regularization/covariate-shift, confirmed concept drift --- is a reproducible methodological finding on the data we have. The text representation (generic sentence embeddings, not finance-tuned) is a further-reaching choice than strictly necessary; a finance-tuned embedding could in principle show different, possibly more stable, dependence structure, which we have not tested. The regime detector in Section~5.7 is one specific instantiation of a covariate-shift test (sliced-Wasserstein, 90-day rolling windows, a 1.5-sigma threshold); we cannot rule out that a different covariate-shift detector, with different windowing or a different divergence measure, would have flagged something ours did not --- though the fact that \emph{two independent modalities}, with the \emph{same} detector family, both came back clean is reassuring on this point.
+
+\section{Conclusion}
+
+We used earnings-announcement prediction as a case study to test whether covariate-shift bounds, the standard theoretical tool for reasoning about zero-shot generalization failure, actually explain real generalization failures when one is observed. They did not, in our case: a verified population-level signal, exploited by a trained model, failed walk-forward validation for a reason invisible to every covariate-shift check we ran, and visible only to a direct test of the conditional relationship itself. We offer the elimination protocol used to reach this conclusion --- capacity ablation, regularization sweep, multi-modality covariate-shift detection, a direct structural-break test, and an independent nonparametric confirmation --- as a general diagnostic, and the result itself as a concrete argument that concept drift deserves equal billing with covariate shift in how zero-shot generalization failure gets reasoned about and tested for.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+
+\section{Full regularization sweep}
+\label{app:regsweep}
+
+\begin{table}[H]
+\centering
+\caption{Fold 0: train $n=623$ [2020-01-15, 2022-01-14), test $n=350$ [2022-01-14, 2023-01-14).}
+\begin{tabular}{@{}lll@{}}
+\toprule
+$\lambda$ & In-sample corr & Out-of-sample corr \\
+\midrule
+0.001 & 0.669 & 0.056 \\
+0.01  & 0.475 & 0.012 \\
+0.1   & 0.365 & 0.003 \\
+1     & 0.320 & $-0.024$ \\
+10    & 0.310 & $-0.031$ \\
+100   & 0.308 & $-0.032$ \\
+1000  & 0.308 & $-0.032$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Fold 1: train $n=673$ [2020-07-15, 2022-07-15), test $n=323$ [2022-07-15, 2023-07-15).}
+\begin{tabular}{@{}lll@{}}
+\toprule
+$\lambda$ & In-sample corr & Out-of-sample corr \\
+\midrule
+0.001 & 0.684 & $-0.030$ \\
+0.01  & 0.490 & $-0.030$ \\
+0.1   & 0.392 & $-0.038$ \\
+1     & 0.365 & $-0.043$ \\
+10    & 0.358 & $-0.044$ \\
+100   & 0.357 & $-0.044$ \\
+1000  & 0.357 & $-0.044$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Fold 2: train $n=665$ [2021-01-13, 2023-01-13), test $n=325$ [2023-01-13, 2024-01-13).}
+\begin{tabular}{@{}lll@{}}
+\toprule
+$\lambda$ & In-sample corr & Out-of-sample corr \\
+\midrule
+0.001 & 0.683 & 0.005 \\
+0.01  & 0.480 & $-0.036$ \\
+0.1   & 0.354 & $-0.040$ \\
+1     & 0.283 & $-0.021$ \\
+10    & 0.269 & $-0.017$ \\
+100   & 0.267 & $-0.016$ \\
+1000  & 0.267 & $-0.016$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Full leakage audit}
+\label{app:leakage}
+
+\begin{table}[H]
+\centering
+\caption{Data-leakage audit: enforcement of each control.}
+\begin{tabular}{@{}p{5cm}p{8cm}@{}}
+\toprule
+Check & Enforcement \\
+\midrule
+Bandwidth $h^2_X$, $h^2_Z$ & Median heuristic on train data; frozen for test scoring \\
+Regime threshold & Calibrated on train windows; applied unchanged to test \\
+KRR regularization $\lambda$ & Fixed constant; never cross-validated on $Y$ \\
+KRR in-sample evaluation & LOO formula \citep{rifkin2004defense}; no test data seen \\
+Signal scoring & \texttt{SignalEstimator.score()} uses frozen bandwidths and coefficients \\
+Price feature normalization & Cross-sectional per date; no look-forward across dates \\
+Price feature window & $[t-22, t-2]$ trading days --- no overlap with $[t+1, t+5]$ return window \\
+Walk-forward splits & Each fold fits exclusively on events before \texttt{train\_end} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Known limitations (not leakage, but caveats):
+\begin{itemize}
+  \item \textbf{Survivorship bias}: Universe is 2024 S\&P 500 snapshot.
+  \item \textbf{After-hours timing}: Filing date not shifted to $t+1$ for after-hours 8-Ks.
+  \item \textbf{Adjusted prices}: yfinance retroactive split adjustment is fine for research.
+\end{itemize}
+
+\section{Reproducibility}
+
+All results are reproducible from \texttt{dataset\_cache/surprise\_matched\_150.npz} (no network required) via the scripts in \texttt{scripts/}:
+
+\begin{itemize}
+  \item \texttt{step2\_magnitude\_direction.py}, \texttt{step2b\_walkforward.py} --- Section~\ref{sec:naive-strategy}
+  \item \texttt{step2c\_diagnose.py} --- capacity ablation (Section~5.5)
+  \item \texttt{step2d\_reg\_sweep.py} --- regularization sweep (Section~5.6)
+  \item \texttt{step2e\_regime\_aware.py}, \texttt{step2f\_x\_regime.py} --- covariate-shift detection (Section~5.7)
+  \item \texttt{step2g\_chow\_test.py} --- Section~\ref{sec:structural-break}
+  \item \texttt{step3b\_cmmd\_permnull.py}, \texttt{step3c\_cmmd\_linear.py} --- Section~\ref{sec:cmmd} (RBF and linear output kernels respectively)
+\end{itemize}
+
+Dataset construction (network-dependent) is in \texttt{scripts/build\_dataset\_cache\_chunked.py}. Random seed 42 throughout. Package versions: see \texttt{requirements.txt}.
+
+Code: \href{https://github.com/ncbajaj/Residual-Dependence-in-Earnings-Announcements-Empirical-Estimation-of-I-X-Y-Z-}{github.com/ncbajaj/Residual-Dependence-in-Earnings-Announcements}.
+
+\end{document}

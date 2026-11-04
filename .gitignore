@@ -3,6 +3,14 @@
 
 # paper
 *.pdf
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
 
 # data caches and generated files
 *.npy
